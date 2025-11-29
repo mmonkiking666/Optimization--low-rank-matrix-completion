@@ -1,123 +1,128 @@
-# Optimization--low rank matrix completion
-> 基于凸松弛（核范数）的大规模矩阵填充算法实现 - MovieLens 10M 数据集
+# Low-Rank Matrix Completion: Convex vs. Non-Convex Optimization
+> 基于凸松弛（核范数）与非凸优化（ALS+谱初始化）的大规模矩阵填充算法对比研究 - MovieLens 10M 数据集
 
-## 1. 项目简介 (Introduction)
+## 1. 项目背景与简介 (Introduction)
 
-本项目旨在解决大规模推荐系统中的矩阵填充（Matrix Completion）问题。核心目标是预测用户对未观看电影的评分。
+推荐系统的核心挑战之一是**矩阵填充（Matrix Completion）**，即利用极其稀疏的用户评分数据预测缺失的评分。本项目基于 **MovieLens 10M** 数据集，深入探讨并实现了解决该问题的两种主流数学优化范式：
 
-不同于传统的非凸分解方法（如 ALS 或梯度下降），本项目采用了**凸优化**的方法，通过将矩阵的**秩（Rank）**松弛为**核范数（Nuclear Norm）**，将原本 NP-Hard 的非凸问题转化为凸问题求解。项目在 **MovieLens 10M** 数据集上进行了完整验证，并使用了 **5-Fold Cross Validation (5倍交叉验证)** 作为评价标准。
+1.  **凸优化方法 (Convex Approach)**: 基于核范数松弛 (Nuclear Norm Relaxation) 的 Soft-Impute 算法。该方法理论基础扎实，具有全局最优解。
+2.  **非凸优化方法 (Non-Convex Approach)**: 基于谱初始化 (Spectral Initialization) 和交替最小化 (ALS) 的矩阵分解。该方法近年来因其计算效率高且无虚假局部极小值（No Spurious Local Minima）而受到关注。
 
-## 2. 问题描述 (Problem Formulation)
+本项目不仅复现了相关算法，还通过 **5-Fold Cross Validation** 进行了严谨的对比实验。结果表明，非凸方法在适当的初始化策略下，在计算速度和预测精度上均优于传统的凸松弛方法。
 
-### 2.1 原始问题
-矩阵填充的原始目标是寻找一个秩最小的矩阵 $X$，使其在观测位置 $\Omega$ 上与真实评分矩阵 $M$ 一致：
+## 2. 数据集与预处理 (Dataset & Preprocessing)
 
-$$
-\min_{X} \text{rank}(X) \quad \text{s.t.} \quad P_{\Omega}(X) = P_{\Omega}(M)
-$$
+本项目使用 **MovieLens 10M/100k** 数据集 [GroupLens Research]。
 
-由于秩函数 $\text{rank}(X)$ 是非凸且不连续的，直接求解该问题是 NP-Hard 的。
+### 2.1 数据规模与稀疏性
+* **用户数 (Users)**: 69,878
+* **电影数 (Movies)**: 10,681
+* **总评分数**: $\approx 1.00 \times 10^7$
+* **矩阵总容量**: $\approx 7.46 \times 10^8$
+* **稀疏度 (Sparsity)**: **98.66%** 的元素为空。这意味着我们仅拥有 1.34% 的信息来恢复整个矩阵。
 
-### 2.2 凸松弛 (Convex Relaxation)
-根据 *Candes & Recht* 等人的理论，**核范数（Nuclear Norm, $\lVert X \rVert_*$）** 是秩函数的最佳凸包（Convex Envelope）。因此，我们将问题转化为以下凸优化形式：
+### 2.2 数据预处理 (Preprocessing)
+为了提升算法收敛速度和预测准确性，我们实施了以下预处理：
+1.  **去均值化 (Mean Centering)**: 计算全局平均评分，将训练数据中心化($R_{ij} \leftarrow R_{ij} - \mu$)。这消除了数据的偏移量，使零点成为更有意义的参考点。
+2.  **内存优化**: 使用 `.npz` 二进制格式存储稀疏矩阵，并将数据精度压缩为 `float32`，成功在普通单机环境下处理了大规模矩阵。
+
+## 3. 方法一：凸优化 (Convex Optimization)
+
+### 3.1 理论模型
+原始的秩最小化问题是 NP-Hard 的。根据 Candès & Recht 的理论，**核范数(Nuclear Norm)** 是秩函数的最佳凸包。我们将问题转化为以下凸优化形式：
 
 $$
 \min_{X} \frac{1}{2} \lVert P_{\Omega}(X - M) \rVert_F^2 + \lambda \lVert X \rVert_*
 $$
 
 其中：
-* $\lVert X \rVert_* = \sum \sigma_i(X)$ （奇异值之和，即核范数）。
-* $\lambda$ 是正则化参数，用于控制低秩程度。
+* $\lVert X \rVert_* = \sum \sigma_i(X)$ 是核范数（奇异值之和）。
+* $\lambda$ 是正则化参数。
 
-## 3. 数据集 (Dataset)
-
-使用 **MovieLens 10M/100k** 数据集 [GroupLens Research]。
-* 
-### 3.1 基本统计
-* **原始数据**：71,567 用户, 10,681 电影, 10,000,054 条评分。
-* **预处理后**：**69,878** 有效评分用户（即至少有过一次评分行为的用户）。
-* **评分范围**：0.5 - 5.0（步长 0.5）。
-
-### 3.2 数据稀疏性分析 (Sparsity Analysis)
-推荐系统的数据通常具有极高的稀疏性。本项目的矩阵规模与其稀疏度计算如下：
-
-* **矩阵全空间 (Total Entries)**:
-  $$\text{Users} \times \text{Movies} = 69,878 \times 10,681 \approx \mathbf{7.46 \times 10^8} \text{ (7.46亿个格子)}$$
-* **实际观测值 (Observed Ratings)**:
-  $$\approx \mathbf{1.00 \times 10^7} \text{ (1000万条评分)}$$
-* **稀疏度计算 (Sparsity Calculation)**:
-  
-  $$\text{Density} = \frac{10,000,054}{746,366,918} \approx \mathbf{1.34\\%}$$
-  
-  $$\text{Sparsity} = 100\\% - 1.34\\% = \mathbf{98.66\\%}$$
-
-**结论**：矩阵中 **约 98.7% 的元素为空**。这意味着对于绝大多数“用户-电影”对，我们都不知道其评分。这正是本项目需要利用凸优化算法（核范数最小化）从仅有的 1.3% 信息中恢复低秩结构的原因。
-## 4. 方法与实现 (Methodology)
-
-### 4.1 核心算法：Soft-Impute
-为了求解上述核范数正则化问题，使用了 **Soft-Impute** 算法 (Mazumder et al., 2010)。该算法通过迭代奇异值阈值（Iterative Singular Value Thresholding）进行更新：
-
+### 3.2 算法实现：Soft-Impute
+结合参考文献 1 的成果，使用 **Soft-Impute** 算法 (Mazumder et al., 2010)，通过迭代奇异值阈值 (SVT) 求解：
 1.  **SVD 分解**: 对当前填充矩阵进行奇异值分解。
-2.  **奇异值收缩 (Shrinkage)**: $S_{\lambda}(\sigma) = \max(\sigma - \lambda, 0)$。
-3.  **矩阵重构**: 利用收缩后的奇异值重构低秩矩阵。
-4.  **观测值回填**: 保持已知评分不变，仅更新未知位置。
+2.  **收缩 (Shrinkage)**: 将奇异值减去 $\lambda$，小于 0 的截断为 0。
+3.  **重构**: 利用收缩后的奇异值重构低秩矩阵。
 
-### 4.2 关键优化策略 (Optimizations)
+### 3.3 实验结果 (5-Fold CV)
+* **参数设置**: $\lambda=5$, Rank Limit=20, Iterations=15
 
-由于数据集较大($70k \times 10k$)，直接计算会导致严重的内存溢出（Memory Error）。本项目实施了以下工程优化：
-
-1.  **去均值化 (Mean Centering)**:
-    * 在训练前减去全局平均分，使数据中心化。
-2.  **内存压缩**:
-    * 数据类型转换为 `float32` / `int32`，内存占用减半。
-    * 使用二进制 `.npz` 格式存储稀疏结构，大幅提升加载速度。
-    * 在迭代过程中使用 `gc.collect()` 显式管理内存。
-3.  **部分 SVD (Partial SVD)**:
-    * 使用 `scipy.sparse.linalg.svds` 仅计算前 $k$ 个奇异值（Rank Limit），避免全量分解。
-
-## 5. 实验过程与参数调整 (Experiments)
-
-### 5.1 超参数设置
-
-经过多次实验调优，最终选定的最佳参数如下：
-
-| 参数 | 值 | 说明 |
-| :--- | :--- | :--- |
-| **Lambda ($\lambda$)** | **5** | 正则化系数。配合去均值化数据，较小的 $\lambda$ 保留了更多细节。 |
-| **Rank Limit** | **20** | SVD截断维数。平衡了计算速度与模型表达能力。 |
-| **Iterations** | **15** | 迭代次数。保证算法充分收敛。 |
-
-### 5.2 调参记录
-* *初始尝试*：初始 $\lambda=15$，未去均值。结果 RMSE $\approx$ 1.83 (严重欠拟合，预测值趋向于0)。
-* *改进尝试*：引入去均值化，保持 $\lambda=15$。结果 RMSE $\approx$ 1.05。
-* *最终优化*：去均值化 + 降低 $\lambda$ 至 5 + 增加迭代次数。结果 RMSE $\approx$ 0.84。
-
-## 6. 实验结果 (Results)
-
-采用 **5-Fold Cross Validation (5倍交叉验证)** 评估模型性能，评价指标为 RMSE (Root Mean Square Error)。
-
-### 6.1 详细数据表
-
-| 折数 (Fold) | RMSE | 耗时 (Seconds) |
+| Fold | RMSE | Time (s) |
 | :--- | :--- | :--- |
 | Fold 1 | 0.8418 | 77.06s |
 | Fold 2 | 0.8413 | 91.41s |
 | Fold 3 | 0.8403 | 84.30s |
 | Fold 4 | 0.8409 | 89.56s |
 | Fold 5 | 0.8407 | 103.07s |
-| **平均 (Average)** | **0.8410** | **-** |
+| **Average** | **0.8410** | **~89s** |
 
-### 6.2 结果可视化
+![Convex Results](交叉验证RMSE.png)
 
-下图展示了 5 次交叉验证的 RMSE 分布，极小的方差证明了模型的鲁棒性。
+---
 
-![RMSE Analysis](交叉验证RMSE.png)
+## 4. 方法二：非凸优化 (Non-Convex Optimization)
 
+### 4.1 理论模型
+直接对低秩因子矩阵 $U \in \mathbb{R}^{m \times r}$ 和 $V \in \mathbb{R}^{n \times r}$ 进行优化。虽然目标函数非凸，但通过特定的正则化和初始化，可以保证良好的收敛性：
 
-## 7. 参考文献 (References)
+$$
+\min_{U, V} \sum_{(i,j) \in \Omega} (R_{ij} - U_i V_j^T)^2 + \lambda (\lVert U \rVert_F^2 + \lVert V \rVert_F^2)
+$$
+
+### 4.2 算法实现：Smart Init + ALS
+结合参考文献 2, 3, 4 的最新研究成果：
+1.  **谱初始化 (Spectral Initialization)**:
+    * 对零填充矩阵进行 SVD，取前 $r$ 个奇异向量初始化 $U$ 和 $V$。
+    * **作用**: 确保初始点落在全局最优解的“吸引域（Basin of Attraction）”内，避开鞍点。
+2.  **交替最小化 (ALS)**:
+    * 固定 $U$ 优化 $V$，再固定 $V$ 优化 $U$。每一步都是一个凸的岭回归（Ridge Regression）问题。
+
+### 4.3 实验结果 (5-Fold CV)
+* **参数设置**: Rank=10, $\lambda=10.0$, Iterations=6
+
+| Fold | RMSE | Time (s) |
+| :--- | :--- | :--- |
+| Fold 1 | 0.8031 | 20.37s |
+| Fold 2 | 0.8027 | 30.13s |
+| Fold 3 | 0.8023 | 19.97s |
+| Fold 4 | 0.8030 | 19.88s |
+| Fold 5 | 0.8024 | 20.10s |
+| **Average** | **0.8027** | **~22s** |
+
+![Non-Convex Results](交叉验证RMSE（Non-Convex）.png)
+
+---
+
+## 5. 综合对比分析 (Comparison & Discussion)
+
+通过对比两种方法的实验数据，我们得出以下关键结论：
+
+### 5.1 性能对比表
+
+| 比较维度 | 凸优化 (Soft-Impute) | 非凸优化 (Non-Convex ALS) | 结论 |
+| :--- | :--- | :--- | :--- |
+| **预测误差 (RMSE)** | 0.8410 | **0.8027** | 非凸方法精度提升约 **4.6%** |
+| **计算速度 (平均/Fold)** | ~89 秒 | **~22 秒** | 非凸方法快约 **4 倍** |
+| **内存消耗** | 较高 (需存储 $70k \times 10k$ 稠密矩阵) | **极低** (仅存因子矩阵 $U, V$) | 非凸方法更适合超大规模数据 |
+
+### 5.2 深度分析：为什么非凸方法更好？
+
+1.  **偏差 (Bias) 问题**:
+    * **凸方法**: 核范数正则化通过“软阈值”操作（Soft Thresholding）将所有奇异值都减去了 $\lambda$。这虽然实现了低秩，但也人为地压缩了主要成分的能量，导致预测值普遍偏低（Bias）。
+    * **非凸方法**: 直接拟合数据，仅通过 Frobenius 范数约束幅度，没有强制改变奇异值的分布结构，因此在拥有足够数据时，偏差更小。
+
+2.  **计算复杂度**:
+    * **凸方法**: 每次迭代需要计算 $SVD(X)$，即使是 Partial SVD，其复杂度也接近 $O(mnk)$。
+    * **非凸方法**: ALS 的每一步只需解线性方程组，且秩 $r$ 通常很小（本实验为10），计算极其高效。
+
+3.  **优化景观 (Optimization Landscape)**:
+    * 近年来 Ge et al. (2016, 2017) 的研究证明，在满足一定条件（如 RIP 性质或足够多的观测样本）下，低秩矩阵分解的非凸目标函数**没有虚假局部极小值**，且所有的鞍点都有负曲率方向。这意味着配合**谱初始化**，简单的梯度下降或 ALS 也能收敛到全局最优解。
+
+## 6. 参考文献 (References)
 
 1.  **Mazumder, R., Hastie, T., & Tibshirani, R.** (2010). *Spectral Regularization Algorithms for Learning Large Incomplete Matrices*. Journal of Machine Learning Research.
 2.  **Ge, R., Lee, J. D., & Ma, T.** (2016). *Matrix Completion has No Spurious Local Minimum*. NIPS.
 3.  **Ge, R., Jin, C., & Zheng, Y.** (2017). *No Spurious Local Minima in Nonconvex Low Rank Problems: A Unified Geometric Analysis*. ICML.
-4.  **Hastie, T., et al.** (2015). *Matrix Completion and Low-Rank SVD via Fast Alternating Least Squares*. JMLR.
+4.  **Hastie, T., Mazumder, R., Lee, J. D., & Zadeh, R.** (2015). *Matrix Completion and Low-Rank SVD via Fast Alternating Least Squares*. JMLR.
 5.  **Koren, Y., Bell, R., & Volinsky, C.** (2009). *Matrix Factorization Techniques for Recommender Systems*. IEEE Computer.
