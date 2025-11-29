@@ -1,4 +1,4 @@
-# Optimization--low-rank-matrix-completion
+# Optimization--low rank matrix completion
 > 基于凸松弛（核范数）的大规模矩阵填充算法实现 - MovieLens 10M 数据集
 
 ## 1. 项目简介 (Introduction)
@@ -19,14 +19,14 @@ $$
 由于秩函数 $\text{rank}(X)$ 是非凸且不连续的，直接求解该问题是 NP-Hard 的。
 
 ### 2.2 凸松弛 (Convex Relaxation)
-根据 *Candes & Recht* 等人的理论，**核范数（Nuclear Norm, $\|X\|_*$）** 是秩函数的最佳凸包（Convex Envelope）。因此，我们将问题转化为以下凸优化形式：
+根据 *Candes & Recht* 等人的理论，**核范数（Nuclear Norm, $\lVert X \rVert_*$）** 是秩函数的最佳凸包（Convex Envelope）。因此，我们将问题转化为以下凸优化形式：
 
 $$
-\min_{X} \frac{1}{2} \|P_{\Omega}(X - M)\|_F^2 + \lambda \|X\|_*
+\min_{X} \frac{1}{2} \lVert P_{\Omega}(X - M) \rVert_F^2 + \lambda \lVert X \rVert_*
 $$
 
 其中：
-* $\|X\|_* = \sum \sigma_i(X)$ （奇异值之和）。
+* $\lVert X \rVert_* = \sum \sigma_i(X)$ （奇异值之和，即核范数）。
 * $\lambda$ 是正则化参数，用于控制低秩程度。
 
 ## 3. 数据集 (Dataset)
