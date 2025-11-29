@@ -119,6 +119,28 @@ $$
 3.  **优化景观 (Optimization Landscape)**:
     * 近年来 Ge et al. (2016, 2017) 的研究证明，在满足一定条件（如 RIP 性质或足够多的观测样本）下，低秩矩阵分解的非凸目标函数**没有虚假局部极小值**，且所有的鞍点都有负曲率方向。这意味着配合**谱初始化**，简单的梯度下降或 ALS 也能收敛到全局最优解。
 
+### 5.3 内存消耗与空间复杂度分析 (Memory & Space Complexity)
+
+除了预测精度和计算速度，**内存占用**是大规模矩阵填充在实际工程应用中的另一大瓶颈。两种方法在空间复杂度上存在本质区别：
+
+| 方法 | 空间复杂度 (Space Complexity) | 实际内存峰值 (Estimated Peak RAM) | 说明 |
+| :--- | :--- | :--- | :--- |
+| **凸优化 (Soft-Impute)** | **$O(m \times n)$** | **~3.0 GB** | 算法迭代过程中需要维护稠密的重构矩阵 $X$ 或其残差矩阵，内存随数据维度平方级增长。 |
+| **非凸优化 (ALS)** | **$O((m + n) \times r)$** | **< 100 MB** | 仅需存储两个低秩因子矩阵 $U$ 和 $V$。内存消耗极低，随维度线性增长。 |
+
+**详细分析**：
+1.  **凸优化 (Convex)**:
+    * 为了进行奇异值分解 (SVD)，Soft-Impute 算法通常需要处理大小为 $69878 \times 10681$ 的稠密矩阵。
+    * 即使使用 `float32` (4 bytes) 存储，仅存储该矩阵就需要：
+        $$69,878 \times 10,681 \times 4 \text{ bytes} \approx \mathbf{2.85 \text{ GB}}$$
+    * 这就是为什么在代码实现中必须极其小心地管理内存（使用 `gc.collect`）并进行数据类型压缩的原因，否则极易触发 `MemoryError`。
+
+2.  **非凸优化 (Non-Convex)**:
+    * ALS 算法利用了矩阵分解的特性，从未显式构建完整的 $m \times n$ 矩阵。
+    * 当 Rank $r=10$ 时，只需存储：
+        $$(69,878 + 10,681) \times 10 \times 4 \text{ bytes} \approx \mathbf{3.1 \text{ MB}}$$
+      
+3.  **结论**：非凸方法的内存效率是凸方法的 **近 1000 倍**，这使其能够轻松扩展到亿级用户规模的工业界推荐系统中。 
 ## 6. 参考文献 (References)
 
 1.  **Mazumder, R., Hastie, T., & Tibshirani, R.** (2010). *Spectral Regularization Algorithms for Learning Large Incomplete Matrices*. Journal of Machine Learning Research.
