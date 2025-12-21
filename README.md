@@ -71,7 +71,6 @@ $$
 | **Average** | **0.8413** | **~70s** |
 
 ### 使用随机SVD方法改进后，在平均RMSE基本不变的情况下，时间快了20s，性能得到提升。
-![RSVD Convex Results](RSVD交叉验证RMSE.png)
 
 
 ---
@@ -125,16 +124,16 @@ $$
 1.  **迭代收敛曲线图**
 
 ![Comparison Figure1](迭代收敛曲线图.png)
-
+* 从迭代收敛曲线图可以看出，非凸方法的收敛明显更快；且收敛的RMSE更低
 2.  **预测值分布直方图**
 
 ![Comparison Figure2](预测值分布直方图.png)
-
+* 从预测值分布直方图可以看出，非凸方法的预测精度更高，偏差更小。
 
 3.  **奇异值分布谱**
 
 ![Comparison Figure4](奇异值分布谱.png)
-
+* 从恢复后矩阵的奇异值分布谱可以看出，初始观测矩阵的奇异值分布确实是近似低秩的，这也进一步证明了截断操作的合理性。（由于初始矩阵规模太大无法直接进行奇异值分解，故采用低秩矩阵逼近后的恢复矩阵，凸方法rank=20；非凸方法rank=10）
 ### 5.3 深度分析：为什么非凸方法更好？
 
 1.  **偏差 (Bias) 问题**:
@@ -169,7 +168,7 @@ $$
     * 当 Rank $r=10$ 时，只需存储：
         $$(69,878 + 10,681) \times 10 \times 4 \text{ bytes} \approx \mathbf{3.1 \text{ MB}}$$
       
-3.  **结论**：非凸方法的内存效率是凸方法的 **近 1000 倍**，这使其能够轻松扩展到亿级用户规模的工业界推荐系统中。 
+3.  **结论**：非凸方法的内存效率是凸方法的 **近 1000 倍**，这使其能够轻松扩展到亿级用户规模的电影评分推荐系统中。 
 ## 6. 参考文献 (References)
 
 1.  **Mazumder, R., Hastie, T., & Tibshirani, R.** (2010). *Spectral Regularization Algorithms for Learning Large Incomplete Matrices*. Journal of Machine Learning Research.
